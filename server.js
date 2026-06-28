@@ -35,8 +35,39 @@ let analysisError = null;
 const COOLDOWN_MS = 3 * 60 * 1000; // 3 minutes cooldown for manual refresh
 const AUTO_REFRESH_MS = 15 * 60 * 1000; // 15 minutes auto-refresh
 
-// Binance API: fetch BTC/USDT price data
+// Coinbase API: fetch BTC price data (friendly to cloud services like Render)
+async function fetchBTCPriceCoinbase() {
+  try {
+    const response = await fetch('https://api.exchange.coinbase.com/products/BTC-USD/stats', {
+      headers: { 'User-Agent': 'CryptoPulseAI/1.0' }
+    });
+    if (!response.ok) throw new Error(`Coinbase API error: ${response.status}`);
+    const data = await response.json();
+    const open = parseFloat(data.open);
+    const last = parseFloat(data.last);
+    const change24h = ((last - open) / open) * 100;
+    
+    return {
+      price: last,
+      change24h: change24h,
+      high24h: parseFloat(data.high),
+      low24h: parseFloat(data.low),
+      volume24h: parseFloat(data.volume)
+    };
+  } catch (err) {
+    console.error('Error fetching BTC price from Coinbase:', err.message);
+    return null;
+  }
+}
+
+// Fetch BTC/USDT price data with multi-source fallback
 async function fetchBTCPrice() {
+  // Try Coinbase first (cloud-friendly)
+  const cbPrice = await fetchBTCPriceCoinbase();
+  if (cbPrice) return cbPrice;
+
+  // Fallback to Binance (works locally, but often blocked on Render cloud instances)
+  console.log('Falling back to Binance API...');
   try {
     const response = await fetch('https://api.binance.com/api/v3/ticker/24hr?symbol=BTCUSDT');
     if (!response.ok) throw new Error(`Binance API error: ${response.status}`);
