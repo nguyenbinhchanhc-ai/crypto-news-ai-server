@@ -28,12 +28,16 @@ const parser = new Parser();
 let cachedAnalysis = null;
 let cachedPrice = null;
 let cachedNews = [];
+let cachedNewsDigest = '';
 let lastAnalysisTime = 0;
+let lastHelperTime = 0;
 let isAnalyzing = false;
+let isHelperRunning = false;
 let analysisError = null;
 
 const COOLDOWN_MS = 3 * 60 * 1000; // 3 minutes cooldown for manual refresh
 const AUTO_REFRESH_MS = 15 * 60 * 1000; // 15 minutes auto-refresh
+const HELPER_INTERVAL_MS = 30 * 1000; // 30 seconds interval for 8B helper bot
 
 // OKX API: fetch BTC/USDT price data (matches user's preferred OKX rates)
 async function fetchBTCPriceOKX() {
@@ -117,28 +121,38 @@ async function fetchBTCPrice() {
   }
 }
 
-// Parse News RSS feeds
+// Parse News RSS feeds (handles user-agent blocks and cleans unescaped XML entities)
 async function fetchNews() {
   const feeds = [
     { name: 'CoinTelegraph', url: 'https://cointelegraph.com/rss' },
     { name: 'CoinDesk', url: 'https://www.coindesk.com/arc/outboundfeeds/rss/' },
-    { name: 'Decrypt', url: 'https://decrypt.co/feed' }
+    { name: 'Decrypt', url: 'https://decrypt.co/feed' },
+    { name: 'Blockworks', url: 'https://blockworks.co/feed' }
   ];
 
   const allArticles = [];
   for (const feed of feeds) {
     try {
-      // Set a short timeout for each feed fetch to prevent blocking
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 8000);
+      const timeoutId = setTimeout(() => controller.abort(), 6000);
 
-      const parsed = await parser.parseURL(feed.url);
+      const response = await fetch(feed.url, {
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+        signal: controller.signal
+      });
       clearTimeout(timeoutId);
+
+      if (!response.ok) throw new Error(`Status ${response.status}`);
+      const xmlText = await response.text();
+      // Clean up raw unescaped '&' which causes sax parser errors
+      const cleanXml = xmlText.replace(/&(?!(?:[a-zA-Z]+|#[0-9]+|#x[0-9a-fA-F]+);)/g, '&amp;');
+      
+      const parsed = await parser.parseString(cleanXml);
 
       parsed.items.forEach(item => {
         allArticles.push({
-          title: item.title,
-          link: item.link,
+          title: item.title || '',
+          link: item.link || '',
           pubDate: item.pubDate ? new Date(item.pubDate) : new Date(),
           source: feed.name,
           contentSnippet: item.contentSnippet || item.content || ''
@@ -151,50 +165,130 @@ async function fetchNews() {
 
   // Sort by date descending
   allArticles.sort((a, b) => b.pubDate - a.pubDate);
-  return allArticles.slice(0, 15);
+  // Return top 30 to give the helper AI a wider choice
+  return allArticles.slice(0, 30);
+}
+
+// Helper Bot: uses llama-3.1-8b-instant to pre-filter, summarize, and translate 30 news articles
+async function generateHelperAnalysis(newsArticles) {
+  const apiKey = process.env.GROQ_API_KEY_HELPER || process.env.GROQ_API_KEY;
+  if (!apiKey) {
+    throw new Error('No Groq API Key defined for Helper.');
+  }
+
+  const formattedNews = newsArticles.map((art, idx) => {
+    return `${idx + 1}. [${art.source}] Title: ${art.title}\n   Snippet: ${art.contentSnippet.slice(0, 200)}`;
+  }).join('\n\n');
+
+  const prompt = `
+Bạn là trợ lý AI tìm kiếm và lọc tin tức crypto. Hãy xử lý danh sách 30 bài báo tiếng Anh sau.
+
+Nhiệm vụ:
+1. Lọc ra khoảng 10-12 bài viết quan trọng nhất, có ảnh hưởng lớn nhất đến giá Bitcoin và thị trường crypto.
+2. Dịch tiêu đề (Title) và mô tả ngắn (Snippet) của các bài viết được chọn sang tiếng Việt chuẩn, tự nhiên.
+3. Viết 1 đoạn văn ngắn (từ 3-4 câu) tóm tắt xu hướng/chủ đề chính của các tin tức này (news digest).
+
+YÊU CẦU QUAN TRỌNG:
+- Trả về kết quả CHỈ ở định dạng JSON theo cấu trúc dưới đây.
+- VIẾT HOÀN TOÀN BẰNG TIẾNG VIỆT CHUẨN, TỰ NHIÊN.
+- TUYỆT ĐỐI KHÔNG sử dụng bất kỳ ký tự tiếng Trung nào (ví dụ: KHÔNG DÙNG 缺乏, 缺少, 難, mà phải dùng từ tiếng Việt như "thiếu", "cần", "khó khăn").
+- Đảm bảo viết đúng ngữ pháp tiếng Việt, không bị dính chữ hay thiếu dấu.
+
+Cấu trúc JSON yêu cầu:
+{
+  "newsDigest": "<đoạn văn tóm tắt xu hướng tin tức bằng tiếng Việt>",
+  "translatedNews": [
+    {
+      "title": "<tiêu đề dịch sang tiếng Việt>",
+      "snippet": "<mô tả ngắn dịch sang tiếng Việt>",
+      "source": "<tên nguồn, ví dụ CoinTelegraph>",
+      "link": "<đường dẫn link gốc của bài viết>"
+    },
+    ...
+  ]
+}
+`;
+
+  try {
+    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        model: process.env.GROQ_MODEL_HELPER || 'llama-3.1-8b-instant',
+        messages: [
+          {
+            role: 'system',
+            content: 'You are a professional crypto translator. You translate English news to Vietnamese. You MUST write only in Vietnamese and return a JSON object. You are strictly forbidden from outputting Chinese characters.'
+          },
+          {
+            role: 'user',
+            content: prompt
+          }
+        ],
+        response_format: { type: 'json_object' }
+      })
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Helper Groq API error: ${response.status} - ${errorText}`);
+    }
+
+    const data = await response.json();
+    const content = data.choices[0].message.content;
+    return JSON.parse(content);
+  } catch (err) {
+    console.error('Helper AI Analysis failed:', err.message);
+    throw err;
+  }
 }
 
 // Generate Sentiment Analysis using Groq Llama-3.3-70b
-async function generateAIAnalysis(priceInfo, newsArticles) {
+async function generateAIAnalysis(priceInfo, newsDigest, newsArticles) {
   if (!process.env.GROQ_API_KEY) {
     throw new Error('GROQ_API_KEY is not defined in environment variables.');
   }
 
   const formattedNews = newsArticles.map((art, idx) => {
-    return `${idx + 1}. [${art.source}] ${art.title}\n   Snippet: ${art.contentSnippet.slice(0, 150)}...`;
+    return `${idx + 1}. [${art.source}] ${art.title}\n   Tóm tắt: ${art.snippet}`;
   }).join('\n\n');
 
   const prompt = `
-Analyze the current Bitcoin (BTC) market status and recent news to provide a sentiment score, summary of key events, negative/positive factors, short-term outlook, and a Vietnamese translation of the news articles.
+Phân tích trạng thái thị trường Bitcoin (BTC) dựa trên giá hiện tại và các tin tức đã được dịch tóm tắt sau đây để đưa ra điểm số tâm lý, nhận định chi tiết, triển vọng ngắn hạn và các yếu tố tác động.
 
-Current BTC/USDT price stats:
-- Price: $${priceInfo.price.toLocaleString()}
-- 24h Change: ${priceInfo.change24h}%
-- 24h High: $${priceInfo.high24h.toLocaleString()}
-- 24h Low: $${priceInfo.low24h.toLocaleString()}
-- 24h Volume: ${priceInfo.volume24h.toLocaleString()} BTC
+Thông tin giá BTC/USDT hiện tại (từ OKX):
+- Giá hiện tại: $${priceInfo.price.toLocaleString()}
+- Thay đổi 24h: ${priceInfo.change24h}%
+- Giá cao nhất 24h: $${priceInfo.high24h.toLocaleString()}
+- Giá thấp nhất 24h: $${priceInfo.low24h.toLocaleString()}
+- Khối lượng 24h: ${priceInfo.volume24h.toLocaleString()} BTC
 
-Recent aggregated news articles (translate their titles and snippets to Vietnamese):
+Tóm tắt xu hướng tin tức thị trường:
+${newsDigest}
+
+Chi tiết các tin tức thị trường gần đây:
 ${formattedNews}
 
-Provide your analysis in JSON format with the following keys. Please write all texts in Vietnamese (tiếng Việt):
+Yêu cầu phân tích và trả về định dạng JSON dưới đây.
+QUY TẮC BẮT BUỘC:
+- Viết văn bản hoàn toàn bằng TIẾNG VIỆT CHUẨN, tự nhiên, mạch lạc, chuyên nghiệp.
+- TUYỆT ĐỐI KHÔNG sử dụng ký tự tiếng Trung hay bất kỳ từ tiếng Trung nào (ví dụ: KHÔNG DÙNG 缺乏, 缺少, 難, mà phải dùng từ tiếng Việt như "thiếu", "cần", "khó khăn").
+- Đảm bảo các từ không bị dính vào nhau (ví dụ: viết "và thiếu" thay vì "vàthiếu" hay "và缺乏").
+
+Cấu trúc JSON phản hồi:
 {
-  "sentimentScore": <number between -100 and 100, where -100 is extremely bearish, 0 is neutral, and 100 is extremely bullish>,
+  "sentimentScore": <số từ -100 đến 100, trong đó -100 là cực kỳ tiêu cực, 0 là trung lập, 100 là cực kỳ tích cực>,
   "sentimentLabel": "<Tích cực | Tiêu cực | Trung lập>",
-  "summary": ["<bullet point 1 in Vietnamese>", "<bullet point 2 in Vietnamese>", ...],
-  "marketOutlook": "<1-2 sentence short term outlook in Vietnamese>",
-  "detailedAnalysis": "<Detailed, paragraph-long market overview and trend analysis in Vietnamese. Support markdown.>",
+  "summary": ["<tóm tắt điểm tin chính 1 bằng tiếng Việt>", "<tóm tắt điểm tin chính 2 bằng tiếng Việt>", ...],
+  "marketOutlook": "<Nhận định triển vọng ngắn hạn bằng tiếng Việt, từ 1-2 câu>",
+  "detailedAnalysis": "<Phân tích xu hướng thị trường chi tiết bằng tiếng Việt, hỗ trợ markdown, viết mạch lạc thành đoạn văn chuyên nghiệp>",
   "keyFactors": {
-    "positive": ["<positive driver 1 in Vietnamese>", ...],
-    "negative": ["<negative driver 1 in Vietnamese>", ...]
-  },
-  "translatedNews": [
-    {
-      "title": "<dịch tiêu đề bài viết 1 sang tiếng Việt>",
-      "snippet": "<dịch mô tả ngắn bài viết 1 sang tiếng Việt>"
-    },
-    ... (exactly 15 entries matching the order of input news)
-  ]
+    "positive": ["<yếu tố thúc đẩy tích cực 1>", ...],
+    "negative": ["<yếu tố tiêu cực/rủi ro 1>", ...]
+  }
 }
 Respond strictly with valid JSON.
 `;
@@ -211,7 +305,7 @@ Respond strictly with valid JSON.
         messages: [
           {
             role: 'system',
-            content: 'You are an expert crypto market analyst who speaks fluent Vietnamese. You analyze news and price feeds to output precise, professional market reports. You must always return a JSON object conforming exactly to the requested schema. Do not write any explanations before or after the JSON.'
+            content: 'You are an expert crypto market analyst who speaks fluent Vietnamese. You write only in Vietnamese and return a JSON object. You are strictly forbidden from outputting Chinese characters.'
           },
           {
             role: 'user',
@@ -238,12 +332,39 @@ Respond strictly with valid JSON.
   }
 }
 
-// Background routine to refresh cached data
+// Background Helper Search routine: runs every 30 seconds
+async function performHelperSearch() {
+  if (isHelperRunning) return;
+  isHelperRunning = true;
+  console.log('30s Helper Search & Translation started...');
+
+  try {
+    const price = await fetchBTCPrice();
+    if (price) cachedPrice = price;
+
+    const rawNews = await fetchNews();
+    if (rawNews && rawNews.length > 0) {
+      const helperResult = await generateHelperAnalysis(rawNews);
+      if (helperResult.translatedNews && helperResult.translatedNews.length > 0) {
+        cachedNews = helperResult.translatedNews;
+        cachedNewsDigest = helperResult.newsDigest;
+        lastHelperTime = Date.now();
+        console.log('30s Helper Search completed. Translated', cachedNews.length, 'articles.');
+      }
+    }
+  } catch (err) {
+    console.error('30s Helper Search failed:', err.message);
+  } finally {
+    isHelperRunning = false;
+  }
+}
+
+// Background routine to refresh cached analysis (Llama 3.3)
 async function performAnalysis() {
   if (isAnalyzing) return;
   isAnalyzing = true;
   analysisError = null;
-  console.log('Background Analysis started...');
+  console.log('Main 70B Analysis started...');
 
   try {
     // 1. Get price
@@ -251,41 +372,39 @@ async function performAnalysis() {
     if (!price) throw new Error('Could not fetch BTC price info.');
     cachedPrice = price;
 
-    // 2. Get news
-    const news = await fetchNews();
-    if (!news || news.length === 0) throw new Error('Could not fetch crypto news.');
-
-    // 3. Generate analysis
-    const analysis = await generateAIAnalysis(price, news);
-    
-    // Map translated news titles back to the news array
-    if (analysis.translatedNews && analysis.translatedNews.length === news.length) {
-      for (let i = 0; i < news.length; i++) {
-        news[i].title = analysis.translatedNews[i].title || news[i].title;
-        news[i].contentSnippet = analysis.translatedNews[i].snippet || news[i].contentSnippet;
-      }
+    // 2. Ensure helper has run at least once
+    if (cachedNews.length === 0) {
+      await performHelperSearch();
     }
-    
+
+    if (cachedNews.length === 0) {
+      throw new Error('Helper Search failed to retrieve news.');
+    }
+
+    // 3. Generate 70B analysis
+    const analysis = await generateAIAnalysis(price, cachedNewsDigest, cachedNews);
     cachedAnalysis = analysis;
-    cachedNews = news;
     lastAnalysisTime = Date.now();
-    console.log('Background Analysis completed successfully.');
+    console.log('Main 70B Analysis completed successfully.');
   } catch (err) {
-    console.error('Background Analysis failed:', err.message);
+    console.error('Main 70B Analysis failed:', err.message);
     analysisError = err.message;
   } finally {
     isAnalyzing = false;
   }
 }
 
-// Auto-refresh interval loop
-setInterval(() => {
-  console.log('Triggering scheduled auto-refresh of market data...');
-  performAnalysis();
-}, AUTO_REFRESH_MS);
+// Initialization routine on server startup
+async function init() {
+  console.log('Initializing Server: Performing startup Helper Search and Main 70B Analysis...');
+  await performHelperSearch();
+  await performAnalysis();
 
-// Run initial analysis on server start
-performAnalysis();
+  // Schedule intervals
+  setInterval(performHelperSearch, HELPER_INTERVAL_MS);
+  setInterval(performAnalysis, AUTO_REFRESH_MS);
+}
+init();
 
 // API: Get current market status (real-time price + news + cached AI analysis)
 app.get('/api/market-status', async (req, res) => {
@@ -298,10 +417,8 @@ app.get('/api/market-status', async (req, res) => {
   // Trigger background analysis if cache is empty or expired
   const age = Date.now() - lastAnalysisTime;
   if (!cachedAnalysis && !isAnalyzing) {
-    // block first call to let analysis complete if it is the absolute start
     await performAnalysis();
   } else if (age > AUTO_REFRESH_MS && !isAnalyzing) {
-    // trigger background refresh without blocking client
     performAnalysis();
   }
 
@@ -310,6 +427,7 @@ app.get('/api/market-status', async (req, res) => {
     news: cachedNews,
     analysis: cachedAnalysis,
     lastUpdated: lastAnalysisTime,
+    lastHelperUpdated: lastHelperTime,
     isAnalyzing,
     error: analysisError,
     cooldownRemaining: Math.max(0, COOLDOWN_MS - (Date.now() - lastAnalysisTime))
@@ -332,7 +450,9 @@ app.post('/api/analyze', async (req, res) => {
   }
 
   console.log('User triggered manual analysis refresh...');
-  // Run synchronously so client gets the new analysis immediately
+  
+  // Force update helper news first so the main analysis is completely fresh
+  await performHelperSearch();
   await performAnalysis();
 
   if (analysisError) {
