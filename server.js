@@ -35,6 +35,33 @@ let analysisError = null;
 const COOLDOWN_MS = 3 * 60 * 1000; // 3 minutes cooldown for manual refresh
 const AUTO_REFRESH_MS = 15 * 60 * 1000; // 15 minutes auto-refresh
 
+// OKX API: fetch BTC/USDT price data (matches user's preferred OKX rates)
+async function fetchBTCPriceOKX() {
+  try {
+    const response = await fetch('https://www.okx.com/api/v5/market/ticker?instId=BTC-USDT');
+    if (!response.ok) throw new Error(`OKX API error: ${response.status}`);
+    const resData = await response.json();
+    if (resData.code !== '0' || !resData.data || resData.data.length === 0) {
+      throw new Error(`OKX API returned bad code: ${resData.msg}`);
+    }
+    const data = resData.data[0];
+    const last = parseFloat(data.last);
+    const open = parseFloat(data.open24h);
+    const change24h = ((last - open) / open) * 100;
+
+    return {
+      price: last,
+      change24h: change24h,
+      high24h: parseFloat(data.high24h),
+      low24h: parseFloat(data.low24h),
+      volume24h: parseFloat(data.vol24h)
+    };
+  } catch (err) {
+    console.error('Error fetching BTC price from OKX:', err.message);
+    return null;
+  }
+}
+
 // Coinbase API: fetch BTC price data (friendly to cloud services like Render)
 async function fetchBTCPriceCoinbase() {
   try {
@@ -62,11 +89,16 @@ async function fetchBTCPriceCoinbase() {
 
 // Fetch BTC/USDT price data with multi-source fallback
 async function fetchBTCPrice() {
-  // Try Coinbase first (cloud-friendly)
+  // 1. Try OKX first (user preferred exchange rates)
+  const okxPrice = await fetchBTCPriceOKX();
+  if (okxPrice) return okxPrice;
+
+  // 2. Try Coinbase second (extremely cloud-friendly fallback)
+  console.log('Falling back to Coinbase API...');
   const cbPrice = await fetchBTCPriceCoinbase();
   if (cbPrice) return cbPrice;
 
-  // Fallback to Binance (works locally, but often blocked on Render cloud instances)
+  // 3. Try Binance third (local fallback)
   console.log('Falling back to Binance API...');
   try {
     const response = await fetch('https://api.binance.com/api/v3/ticker/24hr?symbol=BTCUSDT');
