@@ -123,9 +123,10 @@ function renderDashboard(data) {
     // Sentiment Badge
     sentimentBadgeEl.textContent = analysis.sentimentLabel;
     sentimentBadgeEl.className = 'sentiment-badge';
-    if (analysis.sentimentLabel.toLowerCase() === 'bullish') {
+    const label = analysis.sentimentLabel.toLowerCase();
+    if (label.includes('bullish') || label.includes('tích cực') || label.includes('tăng')) {
       sentimentBadgeEl.classList.add('bullish');
-    } else if (analysis.sentimentLabel.toLowerCase() === 'bearish') {
+    } else if (label.includes('bearish') || label.includes('tiêu cực') || label.includes('giảm')) {
       sentimentBadgeEl.classList.add('bearish');
     } else {
       sentimentBadgeEl.classList.add('neutral');

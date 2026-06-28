@@ -133,7 +133,7 @@ async function generateAIAnalysis(priceInfo, newsArticles) {
   }).join('\n\n');
 
   const prompt = `
-Analyze the current Bitcoin (BTC) market status and recent news to provide a sentiment score, summary of key events, negative/positive factors, and a short-term outlook.
+Analyze the current Bitcoin (BTC) market status and recent news to provide a sentiment score, summary of key events, negative/positive factors, short-term outlook, and a Vietnamese translation of the news articles.
 
 Current BTC/USDT price stats:
 - Price: $${priceInfo.price.toLocaleString()}
@@ -142,20 +142,27 @@ Current BTC/USDT price stats:
 - 24h Low: $${priceInfo.low24h.toLocaleString()}
 - 24h Volume: ${priceInfo.volume24h.toLocaleString()} BTC
 
-Recent aggregated news articles:
+Recent aggregated news articles (translate their titles and snippets to Vietnamese):
 ${formattedNews}
 
-Provide your analysis in JSON format with the following keys. Please analyze in Vietnamese (tiếng Việt) for the summary, marketOutlook, and detailedAnalysis:
+Provide your analysis in JSON format with the following keys. Please write all texts in Vietnamese (tiếng Việt):
 {
   "sentimentScore": <number between -100 and 100, where -100 is extremely bearish, 0 is neutral, and 100 is extremely bullish>,
-  "sentimentLabel": "<Bullish | Bearish | Neutral>",
+  "sentimentLabel": "<Tích cực | Tiêu cực | Trung lập>",
   "summary": ["<bullet point 1 in Vietnamese>", "<bullet point 2 in Vietnamese>", ...],
   "marketOutlook": "<1-2 sentence short term outlook in Vietnamese>",
   "detailedAnalysis": "<Detailed, paragraph-long market overview and trend analysis in Vietnamese. Support markdown.>",
   "keyFactors": {
     "positive": ["<positive driver 1 in Vietnamese>", ...],
     "negative": ["<negative driver 1 in Vietnamese>", ...]
-  }
+  },
+  "translatedNews": [
+    {
+      "title": "<dịch tiêu đề bài viết 1 sang tiếng Việt>",
+      "snippet": "<dịch mô tả ngắn bài viết 1 sang tiếng Việt>"
+    },
+    ... (exactly 15 entries matching the order of input news)
+  ]
 }
 Respond strictly with valid JSON.
 `;
@@ -215,11 +222,20 @@ async function performAnalysis() {
     // 2. Get news
     const news = await fetchNews();
     if (!news || news.length === 0) throw new Error('Could not fetch crypto news.');
-    cachedNews = news;
 
     // 3. Generate analysis
     const analysis = await generateAIAnalysis(price, news);
+    
+    // Map translated news titles back to the news array
+    if (analysis.translatedNews && analysis.translatedNews.length === news.length) {
+      for (let i = 0; i < news.length; i++) {
+        news[i].title = analysis.translatedNews[i].title || news[i].title;
+        news[i].contentSnippet = analysis.translatedNews[i].snippet || news[i].contentSnippet;
+      }
+    }
+    
     cachedAnalysis = analysis;
+    cachedNews = news;
     lastAnalysisTime = Date.now();
     console.log('Background Analysis completed successfully.');
   } catch (err) {
