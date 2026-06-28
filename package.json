@@ -1,0 +1,17 @@
+{
+  "name": "crypto-news-ai-server",
+  "version": "1.0.0",
+  "description": "Real-time crypto news aggregator and Gemini AI analyzer server",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "dotenv": "^16.4.5",
+    "rss-parser": "^3.13.0",
+    "cors": "^2.8.5"
+  }
+}

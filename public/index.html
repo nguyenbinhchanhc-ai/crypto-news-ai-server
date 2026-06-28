@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CryptoPulse AI - Phân Tích & Tổng Hợp Thị Trường Crypto</title>
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- Ambient background glow effect -->
+  <div class="glow glow-1"></div>
+  <div class="glow glow-2"></div>
+
+  <div class="app-container">
+    <!-- Header -->
+    <header class="header">
+      <div class="brand">
+        <div class="logo">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="22 7 13.5 15.5 8.5 10.5 2 17"></polyline>
+            <polyline points="16 7 22 7 22 13"></polyline>
+          </svg>
+        </div>
+        <div class="brand-text">
+          <h1>CryptoPulse <span>AI</span></h1>
+          <p>Phân tích & Tổng hợp thị trường Crypto theo thời gian thực</p>
+        </div>
+      </div>
+
+      <!-- Live Ticker Info -->
+      <div class="price-ticker-card" id="price-ticker">
+        <div class="ticker-label">BTC / USDT Live</div>
+        <div class="price-value" id="btc-price">$--,---.--</div>
+        <div class="price-change-badge" id="btc-change">0.00%</div>
+      </div>
+    </header>
+
+    <!-- Dashboard Grid -->
+    <main class="dashboard-grid">
+      
+      <!-- COLUMN 1: AI Analysis & Market Sentiment -->
+      <section class="main-column">
+        <!-- Sentiment Overview Card -->
+        <div class="card sentiment-card">
+          <div class="card-header">
+            <h2>Chỉ số Tâm lý Thị trường (Sentiment)</h2>
+            <button class="btn-refresh" id="btn-refresh" title="Làm mới phân tích">
+              <svg id="refresh-icon" class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"></path>
+              </svg>
+              <span>Phân tích lại</span>
+            </button>
+          </div>
+          
+          <div class="sentiment-body">
+            <!-- Gauge visualization -->
+            <div class="gauge-wrapper">
+              <div class="gauge">
+                <div class="gauge-body">
+                  <div class="gauge-fill" id="sentiment-fill"></div>
+                  <div class="gauge-cover"></div>
+                </div>
+                <div class="gauge-value" id="sentiment-val">0</div>
+              </div>
+              <div class="gauge-labels">
+                <span class="label-bearish">Bearish</span>
+                <span class="label-neutral">Neutral</span>
+                <span class="label-bullish">Bullish</span>
+              </div>
+            </div>
+
+            <!-- Sentiment summary text -->
+            <div class="sentiment-summary-box">
+              <div class="sentiment-badge" id="sentiment-badge">Neutral</div>
+              <div class="update-time" id="analysis-time">Cập nhật lần cuối: Đang tải...</div>
+              <div id="cooldown-timer" class="cooldown-timer hidden">Chờ 00:00 để làm mới</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- AI Bullet Summary -->
+        <div class="card summary-card">
+          <div class="card-header">
+            <h2>Tóm tắt điểm tin chính</h2>
+          </div>
+          <div class="card-body">
+            <ul class="summary-list" id="summary-list">
+              <div class="skeleton-line"></div>
+              <div class="skeleton-line"></div>
+              <div class="skeleton-line"></div>
+            </ul>
+          </div>
+        </div>
+
+        <!-- AI Market Analysis Details -->
+        <div class="card analysis-card">
+          <div class="card-header">
+            <h2>Nhận định của AI (Llama 3.3)</h2>
+          </div>
+          <div class="card-body">
+            <div class="outlook-section">
+              <h3>Triển vọng ngắn hạn:</h3>
+              <p id="market-outlook" class="market-outlook-text">Đang phân tích dữ liệu thị trường...</p>
+            </div>
+            <hr class="divider">
+            <div class="detailed-analysis-section">
+              <h3>Phân tích chi tiết:</h3>
+              <div id="detailed-analysis" class="markdown-content">
+                Đang thu thập và tổng hợp tin tức từ các nguồn uy tín...
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- COLUMN 2: Market Factors & Live Feed -->
+      <section class="side-column">
+        <!-- Drivers Card (Positive / Negative) -->
+        <div class="card factors-card">
+          <div class="card-header">
+            <h2>Yếu tố Thúc đẩy Thị trường</h2>
+          </div>
+          <div class="factors-grid">
+            <div class="factor-column positive">
+              <h3><span class="dot"></span> Tích cực</h3>
+              <ul id="positive-factors">
+                <div class="skeleton-line mini"></div>
+                <div class="skeleton-line mini"></div>
+              </ul>
+            </div>
+            <div class="factor-column negative">
+              <h3><span class="dot"></span> Tiêu cực</h3>
+              <ul id="negative-factors">
+                <div class="skeleton-line mini"></div>
+                <div class="skeleton-line mini"></div>
+              </ul>
+            </div>
+          </div>
+        </div>
+
+        <!-- Live News List -->
+        <div class="card news-card">
+          <div class="card-header">
+            <h2>Tin tức Tổng hợp Mới nhất</h2>
+            <span class="live-pulse" id="news-count">15 tin</span>
+          </div>
+          <div class="news-list-container" id="news-list">
+            <!-- News items populate here -->
+            <div class="news-skeleton">
+              <div class="skeleton-title"></div>
+              <div class="skeleton-meta"></div>
+            </div>
+            <div class="news-skeleton">
+              <div class="skeleton-title"></div>
+              <div class="skeleton-meta"></div>
+            </div>
+            <div class="news-skeleton">
+              <div class="skeleton-title"></div>
+              <div class="skeleton-meta"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </main>
+
+    <!-- Footer -->
+    <footer class="app-footer">
+      <p>&copy; 2026 CryptoPulse AI. Dữ liệu giá cung cấp bởi Binance. Tin tức tổng hợp từ Cointelegraph, CoinDesk & Decrypt.</p>
+    </footer>
+  </div>
+
+  <!-- Analyzing Overlay Loader -->
+  <div class="loader-overlay" id="loader-overlay">
+    <div class="loader-content">
+      <div class="spinner"></div>
+      <div class="loader-text">AI đang phân tích dữ liệu thị trường và tin tức mới nhất...</div>
+      <div class="loader-subtext">Quá trình này có thể mất 10 - 20 giây</div>
+    </div>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
